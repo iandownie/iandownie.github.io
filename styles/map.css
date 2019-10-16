@@ -2,7 +2,7 @@ body {
   margin: 0;
 }
 .wrapper {
-  padding-top: 64%;
+  padding-top: 100vh;
   position: relative;
 }
 .wrapper svg {
