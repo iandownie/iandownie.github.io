@@ -19,41 +19,31 @@ var countryMapping = {
 var projections = [];
 var zoomRange = [1, 9];
 var selectedProjection = 0;
-var maxCount = 0;
+var maxValue = 0;
 var rotation = 0;
 var colors = ["red", "blue"];
-
 var projections = [
   {
     name: "Natural Earth",
-    value: {
-      projection: d3.geoNaturalEarth1,
-      rotates: true
-    }
+    projection: d3.geoNaturalEarth1
   },
   {
     name: "Mercator",
-    value: {
-      projection: d3.geoMercator,
-      rotates: true
-    }
+    projection: d3.geoMercator
   },
   {
     name: "Globe",
-    value: {
-      projection: d3.geoOrthographic,
-      rotates: true
-    }
+    projection: d3.geoOrthographic
   },
   {
     name: "Stereographic",
-    value: {
-      projection: d3.geoStereographic,
-      rotates: true
-    }
+    projection: d3.geoStereographic
   }
 ];
 
+/**
+ * Runs all of the 1 time calculations that don't need to be run every time the map re-calcuates.
+ */
 function initChart() {
   svg = d3.select(".wrapper").append("svg");
   setDimensions();
@@ -101,13 +91,16 @@ function initChart() {
     .attr("d", path);
   antimeridian = graticuleG.select(".antimeridian");
 
+  // Re-calculates the map projection when the screen size is changed.
   d3.select(window).on("resize", () => resize());
+
+  // Loads basic data for every country including coordinates for drawing their boundaries.
   loadGeoData();
-  countries.map(country => setCountryMapping(country));
+  // Maps all country data to make them easilly retrievable.
+  countries.map(country => addCountryToMapping(country));
 
   // Adds all countries to the map.
   countriesSelection = countriesG.selectAll(".country").data(countries);
-
   countriesSelection
     .enter()
     .insert("path")
@@ -127,6 +120,9 @@ function initChart() {
   draw();
 }
 
+/*
+ * Handles the key down events.
+ */
 function handleKeyDown() {
   switch (d3.event.key) {
     case "ArrowRight":
@@ -144,6 +140,9 @@ function handleKeyDown() {
   }
 }
 
+/**
+ * Changes the map projection from one to another.
+ */
 function handleChangeProjection(projectionChange) {
   selectedProjection = Math.min(
     Math.max(selectedProjection + projectionChange, 0),
@@ -153,23 +152,28 @@ function handleChangeProjection(projectionChange) {
   redrawProjection();
 }
 
+/**
+ * Append and draw all map objects.
+ */
 function draw() {
   antimeridian.classed("active", rotation === 0 ? true : false);
 
-  // Adds all countries to the map.
+  // This can update each country with new data without having to re-select or rebuild them.
   countries.forEach((country, i) => {
     if (country.selection) {
+      // This is applying a "fill" color to each country based on their GDP relative to the maximum GDP value in the dataset.
       country.selection.style("fill", () =>
-        maxCount > 0
-          ? d3.interpolateRgbBasis(colors)(
-              1 / (maxCount / country.properties.gdp_md_est)
-            )
-          : "#333f58"
+        d3.interpolateRgbBasis(colors)(
+          1 / (maxValue / country.properties.gdp_md_est)
+        )
       );
     }
   });
 }
 
+/**
+ * Rotates the earth on its' axis.
+ */
 function rotate(newRotation) {
   rotation = newRotation === 360 ? 0 : rotation + newRotation;
   projection.rotate([rotation, 0, 0]);
@@ -177,6 +181,9 @@ function rotate(newRotation) {
   redrawProjection();
 }
 
+/**
+ * Redraws the aspects of the map that change when the projection is altered.
+ */
 function redrawProjection() {
   countries.forEach((country, i) => {
     if (country.selection) {
@@ -189,10 +196,16 @@ function redrawProjection() {
   equator.attr("d", path);
 }
 
+/**
+ * Calculates the needed summary data.
+ */
 function calculateValues() {
-  maxCount = d3.max(countries, country => country.properties.gdp_md_est);
+  maxValue = d3.max(countries, country => country.properties.gdp_md_est);
 }
 
+/**
+ * Zoom/Pan Map
+ */
 function move() {
   const currentTransform = d3.event.transform;
   zScale = currentTransform.k;
@@ -200,6 +213,9 @@ function move() {
   g.style("stroke-width", 2 / currentTransform.k);
 }
 
+/**
+ * Finds SVG dimensions
+ */
 function setDimensions() {
   const { width, height } = svg.node().getBoundingClientRect();
   dimensions.height = height;
@@ -208,14 +224,15 @@ function setDimensions() {
 }
 
 function loadGeoData() {
-  const world = worldTopo;
-  countries = world.features;
+  // World Topo is an object containing a lot of country data that is
+  // being defined in the /data/hd-countries.js file and included via a script tag in the HTML.
+  countries = worldTopo.features;
 }
 
 function setup() {
   const { height, width } = dimensions;
 
-  projection = projections[selectedProjection].value
+  projection = projections[selectedProjection]
     .projection()
     .translate([width / 2, height / 2])
     .scale(width / 2 / Math.PI);
@@ -223,15 +240,24 @@ function setup() {
   path = d3.geoPath().projection(projection);
 }
 
+/**
+ * Resize Map.
+ */
 function resize() {
   setDimensions();
   redrawProjection();
 }
 
-function setCountryMapping(country) {
+/**
+ * Adds a country to a map for convient fetchign later.
+ */
+function addCountryToMapping(country) {
   countryMapping.fromAlphaTwo.set(country.properties.iso_a2, country);
 }
 
+/**
+ * Handle when a country is hovered over.
+ */
 function handleMouseOver(country) {
   if (hoveredCountry) {
     hoveredCountry.selection.classed("highlighted", false);
