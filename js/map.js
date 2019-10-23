@@ -8,8 +8,19 @@ var svg,
   equator,
   antimeridian,
   graticule,
+  wrapper,
   zScale,
-  hoveredCountry;
+  button,
+  hovered,
+  CountryyScale,
+  scaleRect,
+  yAxis,
+  scaleG,
+  hoveredCountry,
+  scaleSvg;
+  
+var svgPadding = 5
+var saleHeight = 200
 var dimensions = { height: 0, width: 0 };
 var countryMapping = {
   fromAlphaTwo: new Map(),
@@ -19,9 +30,15 @@ var countryMapping = {
 var projections = [];
 var zoomRange = [1, 9];
 var selectedProjection = 0;
-var maxValue = 0;
 var rotation = 0;
+var currentView = 0;
 var colors = ["red", "blue"];
+
+var maxValues = {};
+var views = [
+  {label: "GDP", property: "gdp_md_est"},
+  {label: "Victims", property: "victimCount"}
+]
 var projections = [
   {
     name: "Natural Earth",
@@ -41,13 +58,28 @@ var projections = [
   }
 ];
 
+function loadData(){
+  d3.json("/data/vcdb.json").then(function(data) {
+    console.log(data);
+    // initChart();
+  });
+}
+
 /**
  * Runs all of the 1 time calculations that don't need to be run every time the map re-calcuates.
  */
 function initChart() {
-  svg = d3.select(".wrapper").append("svg");
+  // Append and Save useful DOM selections as variables
+  wrapper = d3.select(".wrapper");
+  svg = wrapper.append("svg")
+  svg.classed("chart-svg", true);
+  g = svg.append("g").classed("primary-group", true);
+  graticuleG = g.append("g").classed("graticule-group", true);
+  countriesG = g.append("g").classed("countries-group", true);
+  button = wrapper.append("button");
   setDimensions();
 
+  // Define the zoom behavior and assign it to the map.
   zoomBehavior = d3
     .zoom()
     .scaleExtent(zoomRange)
@@ -55,11 +87,8 @@ function initChart() {
     .on("zoom", () => move());
   svg.call(zoomBehavior);
 
+  // Apply Key-press events to the map.
   d3.select("body").on("keydown", handleKeyDown);
-
-  g = svg.append("g").classed("primary-group", true);
-  graticuleG = g.append("g").classed("graticule-group", true);
-  countriesG = g.append("g").classed("countries-group", true);
 
   // The Graticule is the lat/long lines
   graticuleG
@@ -115,9 +144,110 @@ function initChart() {
       ).selection = d3.select(this);
     })
     .on("mouseover", d => handleMouseOver(d));
+  
+  // Define button attributes and functionality.
+  button
+    .classed("views-button", true)
+    .text(views[currentView].label)
+    .on("click", handleViewChange)
 
+  // Run data calculations and then apply the calculated data to the data visualization.
   calculateValues();
+  initScale();
   draw();
+}
+
+/**
+ * Runs all of the 1 time calculations for the color scale that don't need to be run every time the map re-calcuates.
+ */
+function initScale(){
+  scaleSvg = wrapper.append("svg")
+    .classed("scale-svg", true);
+  appendScaleGradient();
+  scaleG = scaleSvg.append('g')
+  getScaleDimensions();
+
+  yScale = d3.scaleLinear()
+    .domain([0, maxValues[views[currentView].property]])
+    .range([scaleHeight, 0]);
+
+  scaleG.append("rect")
+    .attr("y", svgPadding)
+    .attr("x", 0)
+    .attr("width", svgPadding * 3)
+    .attr("fill", "url(#bg-gradient)");
+  scaleRect = scaleG.select("rect");
+
+  yAxis = scaleG
+    .append("g")
+    .classed("axis", true)
+    .attr(
+      "transform",
+      `translate(${svgPadding * 3}, ${svgPadding})`
+    );
+
+  updateScale();
+}
+
+/**
+ * Builds the color gradient definition for the color scale.
+ */
+function appendScaleGradient(){
+  scaleGradient = scaleSvg.append("defs").append("linearGradient")
+  scaleGradient.attr("x1", "0%").attr("y1", "100%").attr("x2", "0%").attr("y2", "0%").attr("id", "bg-gradient")
+  colorTops = scaleGradient.selectAll("stop").data(colors)
+  colorTops.enter().insert("stop").attr("stop-color", function(d){return d;}).attr("offset", function(d, i){ return `${(100 / (colors.length - 1)) * i}%` });
+}
+
+/**
+ * Get height and width info for the color-scale.
+ */
+function getScaleDimensions() {
+  scaleHeight = scaleSvg.node().getBoundingClientRect().height - svgPadding * 2;
+  scaleWidth = scaleG.node().getBoundingClientRect().width + svgPadding * 3 + 3;
+}
+
+/**
+ * Apply the latest data to the scale.
+ */
+function drawScale() {
+  yScale.domain([0, maxValues[views[currentView].property]]).range([scaleHeight, 0]);
+
+  scaleRect.attr("height", scaleHeight);
+
+  yAxis.call(d3.axisRight(yScale));
+
+  scaleSvg.attr("width", scaleWidth);
+}
+
+/**
+ * Apply the current data to the scale axis and potentiall re-size if necessary.
+ */
+function updateScale() {
+  yScale.domain([0, maxValues[views[currentView].property]]);
+  yAxis.call(d3.axisRight(yScale));
+  if (scaleWidth !== scaleG.node().getBoundingClientRect().width + 3) {
+    resizeScale();
+  }
+}
+
+/**
+ * Should be called when the scale needs to be resized.
+ */
+function resizeScale() {
+  getScaleDimensions();
+  drawScale();
+}
+
+/*
+ * Changes the current view.
+ */
+function handleViewChange(){
+  currentView = currentView + 1 > views.length -1 ? 0 : currentView + 1;
+  button.text(views[currentView].label);
+  
+  draw()
+  drawScale();
 }
 
 /*
@@ -161,10 +291,13 @@ function draw() {
   // This can update each country with new data without having to re-select or rebuild them.
   countries.forEach((country, i) => {
     if (country.selection) {
+      const property = views[currentView].property;
+      const value = country.properties[property];
+      const maxValue = maxValues[property];
       // This is applying a "fill" color to each country based on their GDP relative to the maximum GDP value in the dataset.
       country.selection.style("fill", () =>
         d3.interpolateRgbBasis(colors)(
-          1 / (maxValue / country.properties.gdp_md_est)
+          1 / (maxValue / value)
         )
       );
     }
@@ -200,7 +333,16 @@ function redrawProjection() {
  * Calculates the needed summary data.
  */
 function calculateValues() {
-  maxValue = d3.max(countries, country => country.properties.gdp_md_est);
+  countries.map(country => country.properties.victimCount = 0)
+  exampleData.map(entry => entry.victim.country.map(country => {
+    const foundCountry = countryMapping.fromAlphaTwo.get(country)
+    if(foundCountry){
+      foundCountry.properties.victimCount++;
+    }
+  }))
+  views.map(view =>{
+    maxValues[view.property] = d3.max(countries, country => country.properties[view.property]);
+  })
 }
 
 /**
