@@ -32,3 +32,6 @@ body {
   top: 20px;
   right: 20px;
 }
+.equator{
+  stroke: red;
+}
